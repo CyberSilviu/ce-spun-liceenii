@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <title>Family Feud HOST</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
+        h1 { text-align: center; margin-bottom: 20px; color: #2c3e50; }
+        
+        /* Containere */
+        .section { background: white; padding: 20px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .controls-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
+        
+        /* Butoane Generale */
+        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; font-weight: bold; font-size: 14px; transition: transform 0.1s; }
+        button:active { transform: scale(0.98); }
+        
+        /* Culori Butoane */
+        .btn-blue { background: #3498db; color: white; }
+        .btn-red { background: #e74c3c; color: white; }
+        .btn-green { background: #2ecc71; color: white; }
+        .btn-gold { background: #f1c40f; color: black; }
+        .btn-purple { background: #9b59b6; color: white; }
+        .btn-dark { background: #34495e; color: white; }
+        
+        /* Stiluri specifice */
+        .answer-btn { width: 100%; text-align: left; margin-bottom: 5px; background: #ecf0f1; border: 1px solid #bdc3c7; color: #333; }
+        .answer-btn.revealed { background: #d4edda; border-color: #c3e6cb; color: #155724; }
+        
+        /* Bonus Input */
+        .bonus-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+        input[type="text"] { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        input[type="number"] { width: 60px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+
+        /* Ascundere secțiuni */
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>🎮 Panou Control HOST</h1>
+
+    <div class="section" style="border-left: 5px solid #34495e; display: flex; justify-content: space-between; align-items: center;">
+        
+        <div style="display:flex; align-items: center; gap: 10px;">
+            <h2 style="margin:0">Control:</h2>
+            <button id="pause-btn" class="btn-dark" onclick="socket.emit('toggle_pause')">
+                ⏸ PAUZĂ ECRAN
+            </button>
+        </div>
+
+        <button onclick="confirmReset()" style="background-color: #8b0000; color: white; border: 2px solid red;">
+            ⚠️ RESETEAZĂ TOT JOCUL
+        </button>
+    </div>
+
+    <div class="section">
+        <h3>Schimbă Modul de Joc</h3>
+        <div class="controls-row">
+            <button class="btn-blue" onclick="socket.emit('enter_normal_mode')">Joc Normal</button>
+            <button class="btn-purple" onclick="socket.emit('enter_bonus_mode')">Runda BONUS (Fast Money)</button>
+        </div>
+    </div>
+
+    <div id="normal-controls" class="section hidden" style="border-left: 5px solid #3498db;">
+        <h2 style="color:#2980b9">Întrebare Curentă:</h2>
+        <h3 id="question-text" style="background:#eef; padding:10px; border-radius:5px;">...</h3>
+        
+        <div class="controls-row">
+            <button class="btn-green" onclick="socket.emit('next_round')">Următoarea Întrebare ➡</button>
+            <button class="btn-red" onclick="socket.emit('give_strike')">Dă un X (Strike) ❌</button>
+            <button class="btn-dark" onclick="socket.emit('clear_strikes')">Șterge X-urile 🗑</button>
+        </div>
+
+        <h3>Răspunsuri:</h3>
+        <div id="answers-list"></div>
+
+        <div class="controls-row" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+            <button class="btn-gold" onclick="socket.emit('award_points', 'A')">💰 Dă punctele la Echipa A</button>
+            <button class="btn-gold" onclick="socket.emit('award_points', 'B')">💰 Dă punctele la Echipa B</button>
+        </div>
+    </div>
+
+    <div id="bonus-controls" class="section hidden" style="border-left: 5px solid #9b59b6;">
+        <h2 style="color:#8e44ad">Runda Bonus</h2>
+        
+        <button class="btn-red" style="width:100%; font-size:18px; margin-bottom:20px;" onclick="socket.emit('start_timer')">
+            ⏱ START TIMER (20s)
+        </button>
+
+        <div id="bonus-inputs-container">
+            </div>
+        
+        <div class="controls-row" style="margin-top: 20px;">
+            <button class="btn-gold" onclick="socket.emit('award_points', 'A')">💰 Puncte Bonus -> Echipa A</button>
+            <button class="btn-gold" onclick="socket.emit('award_points', 'B')">💰 Puncte Bonus -> Echipa B</button>
+        </div>
+    </div>
+
+    <div class="section" style="text-align: center; color: #7f8c8d;">
+        <p>Scor Rundă Curentă (Total): <b id="round-score">0</b></p>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentQuestions = [];
+
+        // --- GENERARE STATICĂ INPUTURI BONUS ---
+        const bonusContainer = document.getElementById('bonus-inputs-container');
+        for(let i=0; i<5; i++) {
+            const row = document.createElement('div');
+            row.className = 'bonus-row';
+            row.innerHTML = `
+                <b>${i+1}.</b>
+                <input type="text" id="b-ans-${i}" placeholder="Răspuns jucător...">
+                <input type="number" id="b-pts-${i}" placeholder="0">
+                <button class="btn-green" onclick="revealBonusRow(${i})">Afișează</button>
+            `;
+            bonusContainer.appendChild(row);
+        }
+
+        // --- FUNCȚII ACȚIUNI ---
+
+        // Trimite datele pentru un rând bonus și îl afișează
+        function revealBonusRow(index) {
+            const text = document.getElementById(`b-ans-${index}`).value;
+            const points = document.getElementById(`b-pts-${index}`).value;
+            
+            if(!text) return alert("Scrie un răspuns înainte să afișezi!");
+
+            socket.emit('reveal_bonus_row', { 
+                index: index, 
+                text: text, 
+                points: points 
+            });
+        }
+
+        // --- UPDATE UI DE LA SERVER ---
+
+        socket.on('init', (data) => {
+            currentQuestions = data.questions;
+            renderAdmin(data.state);
+        });
+
+        socket.on('update_board', (state) => {
+            renderAdmin(state);
+        });
+
+        function renderAdmin(state) {
+            // 1. Gestionare Buton Pauză
+            const pauseBtn = document.getElementById('pause-btn');
+            if (state.isPaused) {
+                pauseBtn.innerText = "▶ REIA JOCUL";
+                pauseBtn.classList.remove('btn-dark');
+                pauseBtn.classList.add('btn-red');
+            } else {
+                pauseBtn.innerText = "⏸ PAUZĂ ECRAN";
+                pauseBtn.classList.remove('btn-red');
+                pauseBtn.classList.add('btn-dark');
+            }
+
+            // 2. Gestionare Scor
+            document.getElementById('round-score').innerText = state.currentScore;
+
+            // 3. Comutare Vizibilitate Moduri
+            if(state.gameMode === 'bonus') {
+                document.getElementById('normal-controls').classList.add('hidden');
+                document.getElementById('bonus-controls').classList.remove('hidden');
+            } else {
+                document.getElementById('normal-controls').classList.remove('hidden');
+                document.getElementById('bonus-controls').classList.add('hidden');
+            }
+
+            // 4. Render Joc Normal
+            if (state.gameMode === 'normal') {
+                const q = currentQuestions[state.currentRoundIndex];
+                if(q) {
+                    document.getElementById('question-text').innerText = q.question;
+                    
+                    const list = document.getElementById('answers-list');
+                    list.innerHTML = '';
+                    
+                    q.answers.forEach((ans, index) => {
+                        const btn = document.createElement('button');
+                        btn.className = 'answer-btn';
+                        // Textul butonului
+                        btn.innerHTML = `<b>${ans.text}</b> <span style="float:right">${ans.points} p</span>`;
+                        
+                        // Dacă e dezvăluit, îl marcam vizual și îl dezactivăm
+                        if (state.revealedAnswers.includes(index)) {
+                            btn.classList.add('revealed');
+                            btn.disabled = true;
+                        }
+                        
+                        btn.onclick = () => socket.emit('reveal_answer', index);
+                        list.appendChild(btn);
+                    });
+                } else {
+                    document.getElementById('question-text').innerText = "Ai ajuns la finalul întrebărilor!";
+                }
+            }
+        }
+        function confirmReset() {
+        if(confirm("ATENȚIE! \n\nEști sigur că vrei să resetezi tot jocul?\n- Se șterg scorurile.\n- Se revine la întrebarea 1.\n\nAceastă acțiune nu poate fi anulată.")) {
+            socket.emit('reset_game');
+        }
+    }
+    </script>
+</body>
+</html>

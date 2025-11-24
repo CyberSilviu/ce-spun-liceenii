@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Feud Display</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        :root { --primary-blue: #003366; --gold: #f1c40f; --blue-gradient: linear-gradient(180deg, #0059b3 0%, #003366 100%); }
+        body { font-family: 'Montserrat', sans-serif; background: radial-gradient(circle at center, #004080 0%, #000b1a 100%); color: white; text-align: center; overflow: hidden; margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+        /* --- SOUND ACTIVATION OVERLAY (MODIFICAT CU LOGO) --- */
+        #sound-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.95); /* Fundal aproape negru */
+            z-index: 10000;
+            display: flex; justify-content: center; align-items: center; flex-direction: column; cursor: pointer;
+        }
+        
+        #start-logo {
+            max-width: 60%;
+            max-height: 60%;
+            cursor: pointer;
+            /* Strălucire aurie și animație de pulsare */
+            filter: drop-shadow(0 0 50px rgba(241, 196, 15, 0.8)); 
+            animation: pulseStart 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseStart {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.08); opacity: 0.8; }
+        }
+
+        /* --- STYLE-URI EXISTENTE (Rămân la fel) --- */
+        .game-container { width: 70%; max-width: 1000px; position: relative; display: flex; flex-direction: column; align-items: center; z-index: 10; }
+        .team-score-box { position: fixed; top: 50%; transform: translateY(-50%); width: 200px; padding: 20px 10px; background: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 15px; backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; }
+        .team-a { left: 20px; border-left: 5px solid #3498db; }
+        .team-b { right: 20px; border-right: 5px solid #e74c3c; }
+        .team-name { font-size: 20px; color: #ccc; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 5px; width: 80%; }
+        .team-points { font-size: 70px; font-weight: 900; line-height: 1; text-shadow: 0 0 20px rgba(255,255,255,0.2); }
+        .team-a .team-points { color: #5dade2; } .team-b .team-points { color: #e74c3c; }
+        
+        #pause-screen { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 10, 30, 0.98); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; }
+        #pause-logo { max-width: 50%; max-height: 50%; animation: breathe 3s infinite ease-in-out; }
+        @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+        #timer-container { display: none; margin-bottom: 20px; }
+        #timer { font-size: 120px; color: white; background: rgba(231, 76, 60, 0.9); width: 220px; height: 220px; border-radius: 50%; display: flex; justify-content: center; align-items: center; border: 8px solid white; box-shadow: 0 0 50px rgba(231, 76, 60, 0.8); }
+        .total-round-box { background: var(--blue-gradient); padding: 10px 40px; border-radius: 15px; border: 3px solid #fff; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 20px; }
+        .total-round-text { font-size: 20px; color: #ccc; text-transform: uppercase; letter-spacing: 2px;}
+        #round-score { font-size: 50px; color: var(--gold); display: block; line-height: 1; }
+        .board-frame { background: rgba(0, 0, 0, 0.4); border: 4px solid #444; border-radius: 20px; padding: 15px; width: 100%; display: flex; flex-direction: column; align-items: center; backdrop-filter: blur(5px); }
+        .answer-row, .bonus-row { display: flex; justify-content: space-between; width: 98%; margin: 6px 0; height: 60px; perspective: 1000px; }
+        .answer-box { width: 100%; height: 100%; display: flex; justify-content: space-between; align-items: center; border: 2px solid white; border-radius: 50px; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: transform 0.5s; }
+        .answer-hidden .answer-box { background: var(--blue-gradient); justify-content: center; border-color: #5dade2; }
+        .number-circle { background: var(--primary-blue); border: 2px solid #5dade2; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .answer-revealed .answer-box { background: white; border: 3px solid var(--gold); animation: flipIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes flipIn { 0% { transform: rotateX(90deg); opacity: 0; } 100% { transform: rotateX(0deg); opacity: 1; } }
+        .answer-text { color: #003366; font-size: 28px; text-transform: uppercase; padding-left: 30px; font-weight: 900; flex-grow: 1; text-align: left; }
+        .answer-points { background: var(--blue-gradient); color: white; font-size: 30px; width: 70px; height: 100%; display: flex; align-items: center; justify-content: center; border-left: 2px solid var(--gold); }
+        .bonus-board .answer-box { border-radius: 10px; background: black; border: 1px solid #555; }
+        .bonus-text { color: white; padding-left: 20px; font-size: 26px; text-transform: uppercase; }
+        .bonus-pts { color: var(--gold); padding-right: 20px; font-size: 26px; font-weight: bold; }
+        .hidden-content { opacity: 0; }
+        #strike-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; gap: 20px; }
+        .strike-x { font-size: 250px; color: #c0392b; font-weight: 900; text-shadow: 0 0 50px #c0392b, 4px 4px 0px black; animation: strikePop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes strikePop { 0% { transform: scale(0); opacity: 0; } 80% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+
+    <div id="sound-overlay" onclick="enableAudio()">
+        <img src="images/logo.png" id="start-logo" alt="Click to Start">
+    </div>
+
+    <div id="pause-screen">
+        <img src="images/logo.png" id="pause-logo" alt="Logo">
+    </div>
+
+    <div class="team-score-box team-a">
+        <div class="team-name">Echipa A</div>
+        <div class="team-points" id="score-a">0</div>
+    </div>
+    <div class="team-score-box team-b">
+        <div class="team-name">Echipa B</div>
+        <div class="team-points" id="score-b">0</div>
+    </div>
+
+    <div class="game-container">
+        <div id="timer-container"><div id="timer">20</div></div>
+        <div class="total-round-box">
+            <div class="total-round-text">Puncte Rundă</div>
+            <span id="round-score">0</span>
+        </div>
+        <div class="board-frame normal-board" id="normal-board"></div>
+        <div class="board-frame bonus-board" id="bonus-board" style="display:none; border-color: #9b59b6;"></div>
+    </div>
+
+    <div id="strike-overlay"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let currentQuestions = [];
+
+        // --- AUDIO SYSTEM ---
+        const audioFiles = {
+            reveal: new Audio('sounds/reveal.mp3'),
+            wrong: new Audio('sounds/wrong.mp3'),
+            pause: new Audio('sounds/pause.mp3')
+        };
+        audioFiles.pause.loop = true;
+
+        function enableAudio() {
+            document.getElementById('sound-overlay').style.display = 'none';
+            // Hack pentru a activa sunetul pe iOS/Chrome
+            audioFiles.reveal.play().then(() => {
+                audioFiles.reveal.pause();
+                audioFiles.reveal.currentTime = 0;
+            }).catch(e => console.log("Audio permission error:", e));
+        }
+
+        // Ascultăm comenzile audio
+        socket.on('play_audio', (type) => {
+            if(type === 'reveal') { audioFiles.reveal.currentTime = 0; audioFiles.reveal.play(); } 
+            else if(type === 'wrong') { audioFiles.wrong.currentTime = 0; audioFiles.wrong.play(); } 
+            else if(type === 'pause_start') { audioFiles.pause.currentTime = 0; audioFiles.pause.play(); } 
+            else if(type === 'pause_stop') { audioFiles.pause.pause(); audioFiles.pause.currentTime = 0; }
+        });
+        
+        // --- UPDATE-URI NORMALE ---
+        socket.on('init', (data) => {
+            currentQuestions = data.questions;
+            renderAll(data.state);
+        });
+
+        socket.on('update_board', (state) => {
+            renderAll(state);
+        });
+
+        socket.on('timer_update', (time) => {
+            const timerEl = document.getElementById('timer');
+            timerEl.innerText = time;
+            if(time <= 5) {
+                timerEl.style.color = '#fff'; timerEl.style.background = 'red'; timerEl.style.transform = 'scale(1.1)';
+            } else {
+                timerEl.style.background = 'rgba(231, 76, 60, 0.9)'; timerEl.style.transform = 'scale(1)';
+            }
+        });
+
+        socket.on('show_strike', (count) => {
+            const overlay = document.getElementById('strike-overlay');
+            overlay.innerHTML = "";
+            for(let i=0; i<count; i++) {
+                const x = document.createElement('div');
+                x.className = 'strike-x'; x.innerText = "X";
+                overlay.appendChild(x);
+            }
+            overlay.style.display = 'flex';
+            setTimeout(() => { overlay.style.display = 'none'; }, 1500);
+        });
+
+        function renderAll(state) {
+            const pauseScreen = document.getElementById('pause-screen');
+            const normalBoard = document.getElementById('normal-board');
+            const bonusBoard = document.getElementById('bonus-board');
+            const timerContainer = document.getElementById('timer-container');
+            const roundScoreBox = document.querySelector('.total-round-box');
+
+            if (state.isPaused) pauseScreen.style.display = 'flex';
+            else pauseScreen.style.display = 'none';
+
+            document.getElementById('round-score').innerText = state.currentScore;
+            document.getElementById('score-a').innerText = state.teamAScore;
+            document.getElementById('score-b').innerText = state.teamBScore;
+
+            if (state.gameMode === 'bonus') {
+                normalBoard.style.display = 'none';
+                roundScoreBox.style.display = 'block';
+                bonusBoard.style.display = 'flex';
+                timerContainer.style.display = 'flex';
+
+                bonusBoard.innerHTML = '';
+                state.bonusBoard.forEach(row => {
+                    const rowDiv = document.createElement('div');
+                    rowDiv.className = 'bonus-row';
+                    const visibilityClass = row.revealed ? '' : 'hidden-content';
+                    rowDiv.innerHTML = `<div class="answer-box"><span class="bonus-text ${visibilityClass}">${row.text || "..."}</span><span class="bonus-pts ${visibilityClass}">${row.points}</span></div>`;
+                    bonusBoard.appendChild(rowDiv);
+                });
+            } else {
+                normalBoard.style.display = 'flex';
+                bonusBoard.style.display = 'none';
+                timerContainer.style.display = 'none';
+                
+                normalBoard.innerHTML = '';
+                const q = currentQuestions[state.currentRoundIndex];
+
+                if(q) {
+                    for (let i = 0; i < 8; i++) {
+                        const rowDiv = document.createElement('div');
+                        rowDiv.className = 'answer-row';
+                        if (q.answers[i]) {
+                            if (state.revealedAnswers.includes(i)) {
+                                rowDiv.classList.add('answer-revealed');
+                                rowDiv.innerHTML = `<div class="answer-box"><div class="answer-text">${q.answers[i].text}</div><div class="answer-points">${q.answers[i].points}</div></div>`;
+                            } else {
+                                rowDiv.classList.add('answer-hidden');
+                                rowDiv.innerHTML = `<div class="answer-box"><div class="number-circle">${i+1}</div></div>`;
+                            }
+                        } else {
+                            rowDiv.style.opacity = 0;
+                            rowDiv.innerHTML = `<div class="answer-box"></div>`;
+                        }
+                        normalBoard.appendChild(rowDiv);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
