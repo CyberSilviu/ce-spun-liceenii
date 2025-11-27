@@ -9,19 +9,20 @@ const io = socketIo(server);
 
 app.use(express.static('public'));
 
-let questions = [];
+let gameData = { rounds: [], bonus: [] };
 try {
-    questions = JSON.parse(fs.readFileSync('questions.json', 'utf8'));
+    const rawData = fs.readFileSync('questions.json', 'utf8');
+    gameData = JSON.parse(rawData);
+    console.log("Întrebări încărcate!");
 } catch (e) {
-    questions = [];
+    console.error("EROARE JSON:", e.message);
 }
 
-// Variabilă separată pentru Timer (nu o trimitem la clienți)
 let timerInterval = null;
 
 let gameState = {
     gameMode: 'normal',
-    isPaused: false, // <--- NOU: Starea de pauză
+    isPaused: false,
     currentRoundIndex: 0,
     revealedAnswers: [],
     currentScore: 0,
@@ -29,34 +30,18 @@ let gameState = {
     teamBScore: 0,
     strikes: 0,
     timer: 20,
-    bonusBoard: [
-        { text: "", points: 0, revealed: false },
-        { text: "", points: 0, revealed: false },
-        { text: "", points: 0, revealed: false },
-        { text: "", points: 0, revealed: false },
-        { text: "", points: 0, revealed: false }
-    ]
+    bonusScore: 0,
+    // 10 sloturi: 0-4 (Jucător 1), 5-9 (Jucător 2)
+    bonusBoard: Array(10).fill().map(() => ({ text: "", points: 0, revealed: false }))
 };
 
 io.on('connection', (socket) => {
-    socket.emit('init', { questions, state: gameState });
+    socket.emit('init', { questions: gameData, state: gameState });
     if(timerInterval) socket.emit('timer_update', gameState.timer);
 
-// 4. PAUZĂ (PLAY / STOP)
-    socket.on('toggle_pause', () => {
-        gameState.isPaused = !gameState.isPaused;
-        io.emit('update_board', gameState);
-        
-        // Trimitem comanda specifică în funcție de stare
-        if (gameState.isPaused) {
-            io.emit('play_audio', 'pause_start');
-        } else {
-            io.emit('play_audio', 'pause_stop');
-        }
-    });
-    // --- LOGICA JOC NORMAL ---
+    // --- NORMAL ---
     socket.on('next_round', () => {
-        if (gameState.currentRoundIndex < questions.length - 1) {
+        if (gameData.rounds && gameState.currentRoundIndex < gameData.rounds.length - 1) {
             gameState.currentRoundIndex++;
             gameState.revealedAnswers = [];
             gameState.currentScore = 0;
@@ -65,26 +50,26 @@ io.on('connection', (socket) => {
         }
     });
 
-   // 1. REVEAL NORMAL
     socket.on('reveal_answer', (index) => {
         if (!gameState.revealedAnswers.includes(index)) {
             gameState.revealedAnswers.push(index);
-            if(questions[gameState.currentRoundIndex] && questions[gameState.currentRoundIndex].answers[index]) {
-                gameState.currentScore += questions[gameState.currentRoundIndex].answers[index].points;
+            const q = gameData.rounds[gameState.currentRoundIndex];
+            if(q && q.answers[index]) {
+                gameState.currentScore += q.answers[index].points;
             }
             io.emit('update_board', gameState);
-            io.emit('play_audio', 'reveal'); // <--- AICI AM ADĂUGAT
+            io.emit('play_audio', 'reveal');
         }
     });
 
-   // 2. STRIKE (X)
     socket.on('give_strike', () => {
         if (gameState.strikes < 3) {
             gameState.strikes++;
             io.emit('show_strike', gameState.strikes);
-            io.emit('play_audio', 'wrong'); // <--- AICI AM ADĂUGAT
+            io.emit('play_audio', 'wrong');
         }
     });
+
     socket.on('clear_strikes', () => {
         gameState.strikes = 0;
         io.emit('update_board', gameState);
@@ -97,44 +82,53 @@ io.on('connection', (socket) => {
         io.emit('update_board', gameState);
     });
 
-    // --- LOGICA MOD BONUS ---
+    // --- BONUS ---
     socket.on('enter_bonus_mode', () => {
         gameState.gameMode = 'bonus';
         gameState.timer = 20;
-        clearInterval(timerInterval); // Reset timer logic
+        gameState.bonusScore = 0;
+        if(timerInterval) clearInterval(timerInterval);
         timerInterval = null;
-        
-        // Curățăm tabla bonus
-        gameState.bonusBoard = gameState.bonusBoard.map(() => ({ text: "", points: 0, revealed: false }));
+        // Resetăm cele 10 sloturi
+        gameState.bonusBoard = Array(10).fill().map(() => ({ text: "", points: 0, revealed: false }));
         io.emit('update_board', gameState);
         io.emit('timer_update', 20);
+        io.emit('stop_audio', 'timer');
     });
 
     socket.on('enter_normal_mode', () => {
         gameState.gameMode = 'normal';
         io.emit('update_board', gameState);
+        io.emit('stop_audio', 'timer');
     });
 
-    // AM MODIFICAT AICI: Primim datele direct la Reveal pentru siguranță
-// 3. REVEAL BONUS
     socket.on('reveal_bonus_row', (data) => {
-        const idx = data.index;
-        gameState.bonusBoard[idx].text = data.text;
-        gameState.bonusBoard[idx].points = parseInt(data.points) || 0;
-        gameState.bonusBoard[idx].revealed = true;
-        gameState.currentScore += gameState.bonusBoard[idx].points;
+        const idx = parseInt(data.index);
+        if(gameState.bonusBoard[idx]) {
+            gameState.bonusBoard[idx].text = data.text;
+            gameState.bonusBoard[idx].points = parseInt(data.points) || 0;
+            gameState.bonusBoard[idx].revealed = true;
+            
+            gameState.bonusScore += gameState.bonusBoard[idx].points; // Adunăm la total
+            
+            io.emit('update_board', gameState);
+            io.emit('play_audio', 'reveal');
+        }
+    });
+    
+    socket.on('give_bonus_strike', () => {
+        io.emit('show_strike', 1);
+        io.emit('play_audio', 'wrong');
+    });
 
-        io.emit('update_board', gameState);
-        io.emit('play_audio', 'reveal'); // <--- AICI AM ADĂUGAT
-    });;
-
-    // --- LOGICA TIMER ---
+    // --- TIMER ---
     socket.on('start_timer', () => {
         gameState.timer = 20;
         io.emit('timer_update', gameState.timer);
+        io.emit('play_audio', 'timer');
 
         if (timerInterval) clearInterval(timerInterval);
-
+        
         timerInterval = setInterval(() => {
             if (gameState.timer > 0) {
                 gameState.timer--;
@@ -142,14 +136,30 @@ io.on('connection', (socket) => {
             } else {
                 clearInterval(timerInterval);
                 timerInterval = null;
-                io.emit('play_sound', 'buzz');
+                io.emit('stop_audio', 'timer');
+                // Mică întârziere pentru a ne asigura că stop s-a procesat înainte de start
+                setTimeout(() => {
+                    io.emit('play_audio', 'timer_end'); 
+                }, 200);
             }
         }, 1000);
     });
 
-    // --- RESET TOTAL JOC ---
+    // --- PAUSE & RESET ---
+socket.on('toggle_pause', () => {
+        gameState.isPaused = !gameState.isPaused;
+        io.emit('update_board', gameState);
+        
+        if (gameState.isPaused) {
+            // Când punem pauză, PORNEȘTE muzica 'pause'
+            io.emit('play_audio', 'pause'); 
+        } else {
+            // Când scoatem pauza, OPREȘTE muzica 'pause'
+            io.emit('stop_audio', 'pause');
+        }
+    });
+
     socket.on('reset_game', () => {
-        // Resetăm variabilele de stare la valorile inițiale
         gameState.currentRoundIndex = 0;
         gameState.revealedAnswers = [];
         gameState.currentScore = 0;
@@ -159,27 +169,17 @@ io.on('connection', (socket) => {
         gameState.gameMode = 'normal';
         gameState.isPaused = false;
         gameState.timer = 20;
-        
-        // Resetăm tabla bonus
-        gameState.bonusBoard = gameState.bonusBoard.map(() => ({ text: "", points: 0, revealed: false }));
+        gameState.bonusScore = 0;
+        gameState.bonusBoard = Array(10).fill().map(() => ({ text: "", points: 0, revealed: false }));
 
-        // Oprim timerul dacă rulează
-        if (timerInterval) {
-            clearInterval(timerInterval);
-            timerInterval = null;
-        }
-
-        // Trimitem noile date către toți clienții (Admin + Display)
+        if (timerInterval) clearInterval(timerInterval);
+        io.emit('stop_audio', 'timer');
         io.emit('update_board', gameState);
-        io.emit('timer_update', 20); 
     });
 });
-
-server.listen(3000, () => {
-    console.log('---------------------------------------------------');
-    console.log('JOC PORNIT! Accesează link-urile de mai jos:');
-    console.log('');
-    console.log('🖥️  ECRAN PUBLIC (Proiector): http://localhost:3000');
-    console.log('🎮 PANOU HOST (Admin):       http://localhost:3000/admin.html');
-    console.log('---------------------------------------------------');
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server pornit!`);
+    console.log(`ADMIN: http://localhost:${PORT}/admin.html`);
+    console.log(`DISPLAY: http://localhost:${PORT}`);
 });
